@@ -1,5 +1,4 @@
-name: Build APK
-
+name: build
 on:
   push:
     branches: [main]
@@ -8,85 +7,45 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # فقط برای ساخت Release هنگام ثبت تگ نسخه
-
-concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
+  contents: write
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+  windows:
+    runs-on: windows-latest
     env:
-      # secrets مستقیماً در شرط step قابل‌خواندن نیستند؛ از این متغیر استفاده می‌کنیم
-      HAS_KEYSTORE: ${{ secrets.KEYSTORE_BASE64 != '' }}
-      FONT_TAG: v33.003
+      QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-python@v5
         with:
-          distribution: temurin
-          java-version: "17"
-
-      - uses: gradle/actions/setup-gradle@v4   # کش Gradle
-
-      - name: اعتبارسنجی پک‌های داده‌ی شخصیت‌ها
-        run: python3 tools/verify_packs.py
-
-      - name: دانلود فونت وزیرمتن (OFL) برای قرارگرفتن در APK
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Run tests
+        run: python -m pytest -q
+      - name: Build EXE (PyInstaller onedir)
+        run: python -m PyInstaller goldsignal.spec --noconfirm
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+      - name: Version
+        id: ver
+        shell: bash
         run: |
-          set -e
-          mkdir -p app/src/main/assets/fonts
-          for w in Regular Bold; do
-            curl -fL --retry 3 --retry-delay 3 \
-              "https://raw.githubusercontent.com/rastikerdar/vazirmatn/${FONT_TAG}/fonts/ttf/Vazirmatn-${w}.ttf" \
-              -o "app/src/main/assets/fonts/Vazirmatn-${w}.ttf"
-          done
-          ls -l app/src/main/assets/fonts
-
-      - name: اجازه اجرای gradlew (آپلود از مرورگر بیت اجرایی را حذف می‌کند)
-        run: chmod +x gradlew
-
-      - name: تست‌های واحد
-        run: bash gradlew --no-daemon testDebugUnitTest
-
-      - name: ساخت APK دیباگ (همیشه قابل نصب)
-        run: bash gradlew --no-daemon assembleDebug
-        env:
-          VERSION_CODE: ${{ github.run_number }}
-
-      - name: آماده‌سازی keystore (فقط اگر در Secrets تعریف شده باشد)
-        if: env.HAS_KEYSTORE == 'true'
-        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
-
-      - name: ساخت APK امضاشده‌ی انتشار
-        if: env.HAS_KEYSTORE == 'true'
-        run: bash gradlew --no-daemon assembleRelease
-        env:
-          KEYSTORE_FILE: ${{ runner.temp }}/release.jks
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          VERSION_CODE: ${{ github.run_number }}
-
-      - name: تغییر نام خروجی‌ها
-        run: |
-          mkdir -p dist
-          cp app/build/outputs/apk/debug/*.apk dist/HistoryTalk-debug.apk
-          if [ "$HAS_KEYSTORE" = "true" ]; then cp app/build/outputs/apk/release/*.apk dist/HistoryTalk-release.apk; fi
-          ls -l dist
-
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "v=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"; else echo "v=0.0.0-dev" >> "$GITHUB_OUTPUT"; fi
+      - name: Build installer
+        shell: pwsh
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVersion=${{ steps.ver.outputs.v }}" installer\goldsignal.iss'
+      - name: Portable zip
+        shell: pwsh
+        run: Compress-Archive -Path dist\GoldSignal\* -DestinationPath "Output\GoldSignal-portable-${{ steps.ver.outputs.v }}.zip"
       - uses: actions/upload-artifact@v4
         with:
-          name: HistoryTalk-apk
-          path: dist/*.apk
-          if-no-files-found: error
-
-      - name: انتشار Release (فقط هنگام ثبت تگ v*)
+          name: GoldSignal-windows
+          path: Output/*
+      - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.apk
+          files: Output/*
           generate_release_notes: true
