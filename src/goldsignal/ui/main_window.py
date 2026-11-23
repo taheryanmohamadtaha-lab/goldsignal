@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (QApplication, QHBoxLayout, QListWidget, QMainWind
                                QSystemTrayIcon, QWidget)
 
 from ..services.controller import Controller
+from .image_page import ImageAnalysisPage
 from .pages import (AboutPage, AlertsPage, BacktestPage, ChartPage, DashboardPage, SettingsPage, SignalsPage)
 from .theme import stylesheet
 from .worker import Task
@@ -32,8 +33,9 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.dash, self.chart, self.sigs = DashboardPage(ctl), ChartPage(ctl), SignalsPage(ctl)
         self.alerts, self.bt, self.settings, self.about = AlertsPage(ctl), BacktestPage(ctl), SettingsPage(ctl), AboutPage()
+        self.imgpage = ImageAnalysisPage()
         for name, w in (("داشبورد", self.dash), ("نمودار", self.chart), ("سیگنال‌ها", self.sigs), ("هشدارها", self.alerts),
-                        ("بک‌تست", self.bt), ("تنظیمات", self.settings), ("درباره", self.about)):
+                        ("بک‌تست", self.bt), ("تحلیل تصویر", self.imgpage), ("تنظیمات", self.settings), ("درباره", self.about)):
             self.nav.addItem(name); self.stack.addWidget(w)
         self.nav.currentRowChanged.connect(self._on_nav); self.nav.setCurrentRow(0)
         root = QWidget(); lay = QHBoxLayout(root); lay.addWidget(self.stack, 1); lay.addWidget(self.nav)   # در RTL نوار کناری سمت راست
